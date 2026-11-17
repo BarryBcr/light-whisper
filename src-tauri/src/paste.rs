@@ -112,7 +112,46 @@ fn compteur_presse_papier() -> isize {
     -1
 }
 
+/// Vrai si macOS autorise l'app à simuler des frappes (réglage Accessibilité).
+///
+/// Piège déjà payé (recette du 17/11/2026) : sans cette autorisation, macOS jette le
+/// Cmd+V simulé SANS renvoyer d'erreur. L'app croyait avoir collé et rien n'apparaissait.
+/// Après activation dans les Réglages, il faut relancer l'app.
+#[cfg(target_os = "macos")]
+pub fn accessibilite_accordee() -> bool {
+    extern "C" {
+        fn AXIsProcessTrusted() -> bool;
+    }
+    unsafe { AXIsProcessTrusted() }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn accessibilite_accordee() -> bool {
+    true
+}
+
 // ── Décisions pures (testées plus bas) ──
+
+/// Que faire de la dictée une fois transcrite.
+#[derive(Debug, PartialEq, Eq)]
+pub enum DecisionCollage {
+    Coller,
+    /// Copier seulement : un Cmd+V serait jeté par macOS.
+    CopierAccessibiliteManquante,
+    /// Copier seulement : le Cmd+V partirait dans une autre fenêtre.
+    CopierFocusPerdu,
+}
+
+/// L'Accessibilité passe en premier : sans elle, même avec le focus, rien ne serait collé.
+pub fn decider_collage(accessibilite: bool, focus_confirme: bool) -> DecisionCollage {
+    if !accessibilite {
+        DecisionCollage::CopierAccessibiliteManquante
+    } else if !focus_confirme {
+        DecisionCollage::CopierFocusPerdu
+    } else {
+        DecisionCollage::Coller
+    }
+}
 
 /// Que faire de l'ancien contenu du presse-papier après le collage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -338,6 +377,22 @@ mod tests {
     #[test]
     fn ne_restaure_pas_si_compteur_inconnu() {
         assert!(!doit_restaurer(-1, -1, true));
+    }
+
+    #[test]
+    fn sans_accessibilite_on_copie_meme_avec_le_focus() {
+        assert_eq!(decider_collage(false, true), DecisionCollage::CopierAccessibiliteManquante);
+        assert_eq!(decider_collage(false, false), DecisionCollage::CopierAccessibiliteManquante);
+    }
+
+    #[test]
+    fn sans_focus_on_copie() {
+        assert_eq!(decider_collage(true, false), DecisionCollage::CopierFocusPerdu);
+    }
+
+    #[test]
+    fn avec_accessibilite_et_focus_on_colle() {
+        assert_eq!(decider_collage(true, true), DecisionCollage::Coller);
     }
 
     #[test]

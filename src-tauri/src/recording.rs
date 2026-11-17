@@ -8,7 +8,8 @@
 //! - l'overlay ne prend plus le focus au démarrage : l'app cible le garde ;
 //! - avant de coller, on vérifie que l'app cible a bien repris le focus. Sinon on ne
 //!   colle pas à l'aveugle : la dictée reste copiée et l'overlay le dit ;
-//! - texte vide, annulation par Échap et passage illisible sont affichés au lieu d'être muets ;
+//! - texte vide, annulation par Échap, passage illisible et Accessibilité manquante sont
+//!   affichés au lieu d'être muets ;
 //! - chaque dictée est sauvée dans `derniere-dictee.txt` et journalisée (`journal.rs`).
 
 use std::sync::atomic::Ordering;
@@ -253,14 +254,25 @@ fn arreter_et_coller(app: &AppHandle, state: &AppState) {
     ligne.focus_confirme =
         pid > 0 && paste::attendre_focus(pid, ATTENTE_FOCUS_MAX, paste::get_frontmost_pid);
 
-    if !ligne.focus_confirme {
-        // Coller à l'aveugle enverrait le texte dans la mauvaise fenêtre.
-        let _ = paste::copier_seulement(&text);
-        ligne.issue = "copiee_sans_coller";
-        ligne.attente_apres_arret_s = arret.elapsed().as_secs_f64();
-        journal::ecrire(&ligne);
-        terminer_avec_message(app, "info", "Copié : faites Cmd+V");
-        return;
+    match paste::decider_collage(paste::accessibilite_accordee(), ligne.focus_confirme) {
+        paste::DecisionCollage::Coller => {}
+        paste::DecisionCollage::CopierAccessibiliteManquante => {
+            let _ = paste::copier_seulement(&text);
+            ligne.issue = "accessibilite_manquante";
+            ligne.attente_apres_arret_s = arret.elapsed().as_secs_f64();
+            journal::ecrire(&ligne);
+            terminer_avec_message(app, "info", "Copié · activez l'Accessibilité");
+            return;
+        }
+        paste::DecisionCollage::CopierFocusPerdu => {
+            // Coller à l'aveugle enverrait le texte dans la mauvaise fenêtre.
+            let _ = paste::copier_seulement(&text);
+            ligne.issue = "copiee_sans_coller";
+            ligne.attente_apres_arret_s = arret.elapsed().as_secs_f64();
+            journal::ecrire(&ligne);
+            terminer_avec_message(app, "info", "Copié : faites Cmd+V");
+            return;
+        }
     }
     if !focus_deja_la {
         std::thread::sleep(STABILISATION_FOCUS);
