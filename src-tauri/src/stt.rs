@@ -108,11 +108,15 @@ impl ParakeetEngine {
     pub fn transcribe(&mut self, samples: &[f32], _language: &str) -> Result<String, String> {
         let model = self.model.as_mut().ok_or("Parakeet model not loaded")?;
 
-        let result = model
-            .transcribe_samples(samples.to_vec(), 16000, 1, None)
-            .map_err(|e| format!("Parakeet transcription failed: {}", e))?;
+        // Réessais avec marges de silence : Parakeet rend parfois un texte vide (coupure.rs).
+        let texte = crate::coupure::transcrire_avec_reessais(samples, |audio| {
+            model
+                .transcribe_samples(audio, 16000, 1, None)
+                .map(|r| r.text)
+                .map_err(|e| format!("Parakeet transcription failed: {}", e))
+        })?;
 
-        Ok(result.text.trim().to_string())
+        Ok(texte.trim().to_string())
     }
 }
 

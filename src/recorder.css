@@ -53,3 +53,16 @@ html, body {
   min-width: 32px;
   text-align: right;
 }
+
+/* États après l'enregistrement : le message remplace la forme d'onde. */
+#message {
+  flex: 1;
+  font-family: -apple-system, 'SF Pro Text', sans-serif;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.9);
+  text-align: center;
+}
+
+#overlay.transcription #rec-dot { background: #f5b942; }
+#overlay.info #rec-dot,
+#overlay.occupe #rec-dot { background: #8ab4ff; animation: none; }

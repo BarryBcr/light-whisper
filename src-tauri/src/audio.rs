@@ -33,6 +33,12 @@ impl AudioRecorder {
         self.recording.load(Ordering::SeqCst)
     }
 
+    /// Accès en lecture aux tampons pendant l'enregistrement, pour la transcription
+    /// au fil de l'eau (`decoupe.rs`). La fréquence vaut 0 tant que le flux n'a pas démarré.
+    pub fn tampons_partages(&self) -> (Arc<Mutex<Vec<f32>>>, Arc<Mutex<u32>>) {
+        (Arc::clone(&self.samples), Arc::clone(&self.sample_rate))
+    }
+
     pub fn start(&mut self, device_name: &str, app: AppHandle) -> Result<(), String> {
         if self.is_recording() {
             return Err("Already recording".to_string());
@@ -322,6 +328,16 @@ pub fn list_input_devices() -> Vec<String> {
     host.input_devices()
         .map(|devices| devices.filter_map(|d| d.name().ok()).collect())
         .unwrap_or_default()
+}
+
+/// Vrai si l'audio est un silence numérique (micro coupé ou accès refusé), pas un
+/// simple silence de pièce. Seuil RMS 1e-6, repris de la version d'origine.
+pub fn est_silence_numerique(samples: &[f32]) -> bool {
+    if samples.is_empty() {
+        return true;
+    }
+    let rms = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
+    rms < 1e-6
 }
 
 /// Resample audio from source_rate to target_rate (linear interpolation)

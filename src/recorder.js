@@ -84,5 +84,21 @@ event.listen('recording-stopped', () => {
   drawWaveform();
 });
 
+// États envoyés par recording.rs : enregistrement, transcription, info, occupe.
+// Pendant la transcription l'overlay reste visible : sans ce retour, l'utilisateur
+// croyait que rien ne se passait et ré-appuyait sur le raccourci.
+const overlayEl = document.getElementById('overlay');
+const messageEl = document.getElementById('message');
+
+event.listen('etat-overlay', (e) => {
+  const { etat, texte } = e.payload;
+  overlayEl.className = etat;
+  const avecMessage = etat !== 'enregistrement';
+  canvas.hidden = avecMessage;
+  timerEl.hidden = avecMessage;
+  messageEl.hidden = !avecMessage;
+  messageEl.textContent = texte || '';
+});
+
 // Initial draw
 drawWaveform();

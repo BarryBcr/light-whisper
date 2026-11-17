@@ -145,7 +145,10 @@ saveBtn.addEventListener('click', async () => {
     // Read current config to preserve shortcut (managed separately)
     const current = await invoke('get_config');
     await invoke('save_config', {
+      // On repart de la config courante : les réglages absents de cet écran
+      // (collage, transcription par morceaux) ne doivent pas être remis à zéro.
       config: {
+        ...current,
         audio_device: audioDeviceEl.value,
         model_size: modelSizeEl.value,
         language: languageEl.value,

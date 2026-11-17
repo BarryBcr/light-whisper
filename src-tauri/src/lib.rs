@@ -1,6 +1,9 @@
 mod audio;
 mod commands;
 mod config;
+mod coupure;
+mod decoupe;
+mod journal;
 mod model_manager;
 mod paste;
 mod recording;
@@ -41,6 +44,8 @@ pub fn run() {
         engine: Mutex::new(engine),
         config: Mutex::new(cfg),
         previous_app_pid: std::sync::atomic::AtomicI32::new(-1),
+        transcription_en_cours: std::sync::atomic::AtomicBool::new(false),
+        continu: Mutex::new(None),
     };
 
     tauri::Builder::default()
