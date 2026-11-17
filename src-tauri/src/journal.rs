@@ -17,6 +17,7 @@ pub struct LigneDictee {
     pub transcription_s: f64,
     pub caracteres: usize,
     pub morceaux: usize,
+    pub morceaux_vides: usize,
     pub app_cible_pid: i32,
     pub focus_confirme: bool,
     pub cmd_v_envoye: bool,
@@ -26,7 +27,7 @@ pub struct LigneDictee {
 impl LigneDictee {
     pub fn formater(&self, horodatage: u64) -> String {
         format!(
-            "{}\tissue={}\taudio={:.1}s\tattente={:.2}s\ttranscription={:.2}s\tcaracteres={}\tmorceaux={}\tpid={}\tfocus={}\tcmd_v={}\trestaure={}",
+            "{}\tissue={}\taudio={:.1}s\tattente={:.2}s\ttranscription={:.2}s\tcaracteres={}\tmorceaux={}\tvides={}\tpid={}\tfocus={}\tcmd_v={}\trestaure={}",
             horodatage,
             self.issue,
             self.audio_s,
@@ -34,6 +35,7 @@ impl LigneDictee {
             self.transcription_s,
             self.caracteres,
             self.morceaux,
+            self.morceaux_vides,
             self.app_cible_pid,
             self.focus_confirme,
             self.cmd_v_envoye,

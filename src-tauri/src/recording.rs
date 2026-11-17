@@ -1,29 +1,34 @@
 //! Cycle d'une dictée : appui → enregistrement → appui → transcription → collage.
 //!
 //! Ce que cette version change par rapport à l'origine, et pourquoi (analyse du 17/11/2026) :
-//! - l'overlay reste visible en « Transcription… » jusqu'au collage : avant, il disparaissait
-//!   à l'arrêt, l'utilisateur croyait que rien ne se passait et ré-appuyait ;
+//! - l'overlay passe en « Transcription… » dès l'appui d'arrêt et reste visible jusqu'au
+//!   collage : avant, il disparaissait, l'utilisateur croyait que rien ne se passait et
+//!   ré-appuyait ;
 //! - un appui pendant la transcription est ignoré (`transcription_en_cours`) ;
 //! - l'overlay ne prend plus le focus au démarrage : l'app cible le garde ;
 //! - avant de coller, on vérifie que l'app cible a bien repris le focus. Sinon on ne
 //!   colle pas à l'aveugle : la dictée reste copiée et l'overlay le dit ;
-//! - texte vide et annulation par Échap sont affichés au lieu d'être muets ;
+//! - texte vide, annulation par Échap et passage illisible sont affichés au lieu d'être muets ;
 //! - chaque dictée est sauvée dans `derniere-dictee.txt` et journalisée (`journal.rs`).
 
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 use crate::audio;
 use crate::config;
-use crate::decoupe::{self, TranscripteurContinu};
+use crate::decoupe::{self, TranscripteurContinu, Transcrire};
 use crate::journal::{self, LigneDictee};
 use crate::paste::{self, Restauration};
 use crate::state::AppState;
 
 /// Délai maximal pour que l'app cible reprenne le focus avant le collage.
 const ATTENTE_FOCUS_MAX: Duration = Duration::from_millis(1000);
+/// Quand le focus a dû être repris, l'app cible a besoin d'un temps pour activer sa
+/// fenêtre avant de recevoir la frappe.
+const STABILISATION_FOCUS: Duration = Duration::from_millis(200);
 /// Durée d'affichage d'un message de fin sur l'overlay.
 const DUREE_MESSAGE: Duration = Duration::from_millis(1600);
 
@@ -45,11 +50,17 @@ fn afficher_etat(app: &AppHandle, etat: &str, texte: &str) {
     );
 }
 
-/// Affiche un message puis cache l'overlay.
+/// Affiche un message puis cache l'overlay, sauf si une nouvelle dictée a démarré
+/// entre-temps (sinon on cacherait l'overlay de la dictée suivante).
 fn terminer_avec_message(app: &AppHandle, etat: &str, texte: &str) {
+    let state = app.state::<AppState>();
+    let generation = state.generation_overlay.load(Ordering::SeqCst);
+    montrer_overlay(app);
     afficher_etat(app, etat, texte);
     std::thread::sleep(DUREE_MESSAGE);
-    cacher_overlay(app);
+    if state.generation_overlay.load(Ordering::SeqCst) == generation {
+        cacher_overlay(app);
+    }
 }
 
 fn montrer_overlay(app: &AppHandle) {
@@ -81,6 +92,25 @@ impl Drop for GardeTranscription<'_> {
     fn drop(&mut self) {
         self.0.transcription_en_cours.store(false, Ordering::SeqCst);
     }
+}
+
+/// Transcription par le moteur partagé de l'app, sous verrou et protégée des paniques.
+fn transcripteur(app: &AppHandle) -> Transcrire {
+    let app = app.clone();
+    Arc::new(move |audio_16k: &[f32]| {
+        let state = app.state::<AppState>();
+        let langue = state.config.lock().unwrap().language.clone();
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut engine = state.engine.lock().unwrap();
+            if !engine.is_loaded() {
+                return Err("STT engine not loaded — download a model in Settings".to_string());
+            }
+            engine.transcribe(audio_16k, &langue)
+        }))
+        .unwrap_or_else(|_| {
+            Err("Transcription crashed — try a different STT engine or model".to_string())
+        })
+    })
 }
 
 /// Stop recording and hide overlay without transcribing (ESC cancel).
@@ -121,6 +151,7 @@ pub fn do_toggle_recording(app: &AppHandle) {
 }
 
 fn demarrer(app: &AppHandle, state: &AppState) {
+    state.generation_overlay.fetch_add(1, Ordering::SeqCst);
     // Capturer l'app au premier plan AVANT de montrer l'overlay.
     let pid = paste::get_frontmost_pid();
     state.previous_app_pid.store(pid, Ordering::SeqCst);
@@ -140,8 +171,11 @@ fn demarrer(app: &AppHandle, state: &AppState) {
 
     if config.transcription_par_morceaux {
         let (echantillons, frequence) = state.recorder.lock().unwrap().tampons_partages();
-        *state.continu.lock().unwrap() =
-            Some(TranscripteurContinu::demarrer(app.clone(), echantillons, frequence));
+        *state.continu.lock().unwrap() = Some(TranscripteurContinu::demarrer(
+            transcripteur(app),
+            echantillons,
+            frequence,
+        ));
     }
 }
 
@@ -149,6 +183,9 @@ fn arreter_et_coller(app: &AppHandle, state: &AppState) {
     state.transcription_en_cours.store(true, Ordering::SeqCst);
     let _garde = GardeTranscription(state);
     let arret = Instant::now();
+    // Retour visuel immédiat, avant les attentes (morceau en cours, arrêt du micro).
+    afficher_etat(app, "transcription", "Transcription…");
+    unregister_escape(app);
 
     // Le transcripteur continu s'arrête en premier : il termine le morceau en cours et
     // rend la position jusqu'où l'audio est déjà transcrit.
@@ -156,8 +193,6 @@ fn arreter_et_coller(app: &AppHandle, state: &AppState) {
 
     let result = state.recorder.lock().unwrap().stop();
     let _ = app.emit("recording-stopped", ());
-    unregister_escape(app);
-    afficher_etat(app, "transcription", "Transcription…");
 
     let (samples, sample_rate) = match result {
         Ok(r) => r,
@@ -167,7 +202,6 @@ fn arreter_et_coller(app: &AppHandle, state: &AppState) {
             return;
         }
     };
-    let audio_s = samples.len() as f64 / sample_rate.max(1) as f64;
 
     if audio::est_silence_numerique(&samples) {
         cacher_overlay(app);
@@ -179,53 +213,26 @@ fn arreter_et_coller(app: &AppHandle, state: &AppState) {
         return;
     }
 
-    let config = state.config.lock().unwrap().clone();
-    let debut_transcription = Instant::now();
-
-    // Seule la partie pas encore transcrite par le continu reste à traiter.
-    let (deja_transcrit, debut_reste) = match continu {
-        Some(bilan) => (bilan.textes, bilan.position.min(samples.len())),
-        None => (Vec::new(), 0),
-    };
-    let reste_16k = audio::resample(&samples[debut_reste..], sample_rate, 16000);
-
-    let transcription = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let mut engine = state.engine.lock().unwrap();
-        if !engine.is_loaded() {
-            return Err("STT engine not loaded — download a model in Settings".to_string());
-        }
-        if reste_16k.len() < decoupe::ECHANTILLONS_MIN_16K {
-            return Ok(String::new());
-        }
-        engine.transcribe(&reste_16k, &config.language)
-    }));
-
     let mut ligne = LigneDictee {
-        audio_s,
-        morceaux: deja_transcrit.len() + 1,
+        audio_s: samples.len() as f64 / sample_rate.max(1) as f64,
         app_cible_pid: state.previous_app_pid.load(Ordering::SeqCst),
         ..Default::default()
     };
 
-    let text = match transcription {
-        Ok(Ok(fin)) => {
-            let mut morceaux = deja_transcrit;
-            morceaux.push(fin);
-            decoupe::assembler(&morceaux)
-        }
-        Ok(Err(e)) => {
+    let debut_transcription = Instant::now();
+    let resultat = match decoupe::finaliser(continu, &samples, sample_rate, &transcripteur(app)) {
+        Ok(r) => r,
+        Err(e) => {
             cacher_overlay(app);
             emit_error(app, &format!("Transcription failed: {}", e));
             return;
         }
-        Err(_) => {
-            cacher_overlay(app);
-            emit_error(app, "Transcription crashed — try a different STT engine or model");
-            return;
-        }
     };
+    let text = resultat.texte;
     ligne.transcription_s = debut_transcription.elapsed().as_secs_f64();
     ligne.caracteres = text.chars().count();
+    ligne.morceaux = resultat.morceaux;
+    ligne.morceaux_vides = resultat.morceaux_vides;
 
     if text.is_empty() {
         ligne.issue = "rien_entendu";
@@ -239,7 +246,8 @@ fn arreter_et_coller(app: &AppHandle, state: &AppState) {
     let _ = std::fs::write(config::chemin_derniere_dictee(), &text);
 
     let pid = ligne.app_cible_pid;
-    if pid > 0 {
+    let focus_deja_la = pid > 0 && paste::get_frontmost_pid() == pid;
+    if pid > 0 && !focus_deja_la {
         paste::activate_pid(pid);
     }
     ligne.focus_confirme =
@@ -254,9 +262,13 @@ fn arreter_et_coller(app: &AppHandle, state: &AppState) {
         terminer_avec_message(app, "info", "Copié : faites Cmd+V");
         return;
     }
+    if !focus_deja_la {
+        std::thread::sleep(STABILISATION_FOCUS);
+    }
 
     // L'overlay disparaît avant le Cmd+V pour ne rien intercepter.
     cacher_overlay(app);
+    let config = state.config.lock().unwrap().clone();
     let restauration = if config.restaurer_presse_papier {
         Restauration::ApresDelai(Duration::from_millis(config.delai_restauration_ms))
     } else {
@@ -269,6 +281,11 @@ fn arreter_et_coller(app: &AppHandle, state: &AppState) {
             ligne.cmd_v_envoye = rapport.cmd_v_envoye;
             ligne.ancien_restaure = rapport.ancien_restaure;
             journal::ecrire(&ligne);
+            if ligne.morceaux_vides > 0 {
+                // Un passage parlé n'a pas pu être transcrit : le dire plutôt que de
+                // laisser croire que le texte est complet.
+                terminer_avec_message(app, "info", "Collé · passage illisible");
+            }
         }
         Err(e) => {
             ligne.issue = "echec_collage";

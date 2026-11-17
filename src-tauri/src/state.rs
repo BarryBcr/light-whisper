@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicI32};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64};
 use std::sync::Mutex;
 
 use crate::audio::AudioRecorder;
@@ -18,6 +18,9 @@ pub struct AppState {
     /// raccourci pendant ce temps est ignoré : avant, il relançait un enregistrement
     /// dont l'overlay volait le focus, et le Cmd+V partait dans le vide.
     pub transcription_en_cours: AtomicBool,
+    /// Incrémenté à chaque nouvelle dictée. Un message de fin (« Annulé »…) ne cache
+    /// l'overlay que si aucune dictée n'a démarré entre-temps.
+    pub generation_overlay: AtomicU64,
     /// Transcription au fil de l'eau pendant l'enregistrement (si activée).
     pub continu: Mutex<Option<TranscripteurContinu>>,
 }

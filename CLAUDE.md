@@ -96,7 +96,7 @@ Communication: `invoke()` for commands, `event.listen()` for backend→frontend 
 - **whisper-rs 0.15 API**: `full_n_segments()` returns `c_int` (not Result); use `state.get_segment(i)` → `Option<WhisperSegment>` → `.to_str()`.
 - **Collage** : l'origine remettait l'ancien presse-papier 100 ms après le Cmd+V ; les apps lentes (Electron, Chrome) collaient alors l'ANCIEN contenu. Désormais pas de remise par défaut, et si `restaurer_presse_papier` est activé, remise tardive protégée par `changeCount`.
 - **Ne jamais transcrire un long bloc d'un coup** : banc du 17/11/2026 (M2 8 Go, Parakeet int8 CPU) : 60 s → 4 s, 180 s → 35 s avec fin inventée. D'où la découpe.
-- **Build Mac de Boubacar** : `make dev-variant` / `make installer-dev` (SDKROOT, symboles CoreML résolus à l'exécution, raisons dans le Makefile). Variante Dev = feature `variante-dev` : `~/lightwhisper-dev/`, Ctrl+Alt+Space, modèles partagés dans `~/lightwhisper/models`.
+- **Build local (macOS récent + Command Line Tools anciens)** : `make dev-variant` / `make installer-dev` (SDKROOT, symboles CoreML résolus à l'exécution, raisons dans le Makefile). Variante Dev = feature `variante-dev` : `~/lightwhisper-dev/`, Ctrl+Alt+Space, modèles partagés dans `~/lightwhisper/models`.
 - **Tests** : `make test` ; banc de vitesse : `make banc` (mode `--morceaux` pour la découpe).
 
 ## Storage Paths

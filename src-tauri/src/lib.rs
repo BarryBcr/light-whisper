@@ -1,4 +1,5 @@
 mod audio;
+mod autotest;
 mod commands;
 mod config;
 mod coupure;
@@ -18,6 +19,17 @@ use state::AppState;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     config::ensure_dirs();
+
+    // Autotest sans bureau (voir autotest.rs) : la vraie chaîne, puis sortie.
+    if let Ok(wav) = std::env::var("LIGHTWHISPER_AUTOTEST") {
+        match autotest::executer(&wav) {
+            Ok(()) => std::process::exit(0),
+            Err(e) => {
+                eprintln!("AUTOTEST ECHEC : {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
 
     let cfg = config::load_config();
 
@@ -45,6 +57,7 @@ pub fn run() {
         config: Mutex::new(cfg),
         previous_app_pid: std::sync::atomic::AtomicI32::new(-1),
         transcription_en_cours: std::sync::atomic::AtomicBool::new(false),
+        generation_overlay: std::sync::atomic::AtomicU64::new(0),
         continu: Mutex::new(None),
     };
 
