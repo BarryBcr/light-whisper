@@ -1,0 +1,6 @@
+chargement modèle : 2.32 s
+duree_s	1re_s	2e_s	mots	debut	fin
+10	0.87	0.76	28	Bonjour, je prépare la	le calendrier de diffusion.
+60	4.13	3.63	180	Bonjour, je prépare la	résumé clair pour l'équipe.
+180	34.18	36.67	546	Bonjour, je prépare la	de la première fois.
+300	>400 (arrêté après 6 min 36, swap, RSS 300 Mo, CPU 25 %)	-	-	-	-

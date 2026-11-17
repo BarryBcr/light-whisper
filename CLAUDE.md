@@ -35,9 +35,14 @@ Alt+Space → do_toggle_recording() → AudioRecorder.start()
   → cpal captures on dedicated thread → Arc<Mutex<Vec<f32>>>
   → emits "waveform-update" events to frontend
 
-Alt+Space again → AudioRecorder.stop() → thread joins
-  → resample to 16kHz → WhisperEngine.transcribe()
-  → paste::paste_text() (clipboard + Cmd/Ctrl+V simulation)
+(fork BarryBcr) pendant l'enregistrement → decoupe::TranscripteurContinu
+  → transcrit des morceaux de 12-30 s coupés aux pauses (coupure.rs)
+
+Alt+Space again → arrêt du continu → AudioRecorder.stop()
+  → transcription du seul reste → assemblage
+  → derniere-dictee.txt → retour du focus VÉRIFIÉ (paste::attendre_focus)
+  → paste::paste_text() (presse-papier + Cmd+V, pas de remise de l'ancien par défaut)
+  → journal.log (une ligne par dictée)
 ```
 
 ### Threading Model
@@ -58,7 +63,10 @@ Alt+Space again → AudioRecorder.stop() → thread joins
 | `lib.rs` | Tauri setup, commands, tray, shortcut handler |
 | `audio.rs` | cpal capture on dedicated thread, resample, WAV export |
 | `stt.rs` | whisper-rs context management and transcription |
-| `paste.rs` | arboard clipboard + enigo keyboard simulation |
+| `paste.rs` | presse-papier, Cmd+V (CGEvent), focus et `changeCount` via ObjC |
+| `recording.rs` | cycle d'une dictée, états de l'overlay |
+| `decoupe.rs` / `coupure.rs` | transcription au fil de l'eau ; `coupure.rs` est pur et partagé avec `bench/` |
+| `journal.rs` | une ligne par dictée dans `journal.log` |
 | `config.rs` | JSON config I/O, directory paths |
 | `model_manager.rs` | HuggingFace model download with streaming progress |
 
@@ -86,13 +94,18 @@ Communication: `invoke()` for commands, `event.listen()` for backend→frontend 
 - **Whisper requires 16kHz mono f32**: recording captures at device native rate, then linear-interpolation resamples.
 - **Transcription is blocking**: runs synchronously on the shortcut handler thread after recording stops.
 - **whisper-rs 0.15 API**: `full_n_segments()` returns `c_int` (not Result); use `state.get_segment(i)` → `Option<WhisperSegment>` → `.to_str()`.
-- **Paste timing**: 50ms delay before simulating Ctrl/Cmd+V, 100ms before restoring previous clipboard.
+- **Collage** : l'origine remettait l'ancien presse-papier 100 ms après le Cmd+V ; les apps lentes (Electron, Chrome) collaient alors l'ANCIEN contenu. Désormais pas de remise par défaut, et si `restaurer_presse_papier` est activé, remise tardive protégée par `changeCount`.
+- **Ne jamais transcrire un long bloc d'un coup** : banc du 17/11/2026 (M2 8 Go, Parakeet int8 CPU) : 60 s → 4 s, 180 s → 35 s avec fin inventée. D'où la découpe.
+- **Build Mac de Boubacar** : `make dev-variant` / `make installer-dev` (SDKROOT, symboles CoreML résolus à l'exécution, raisons dans le Makefile). Variante Dev = feature `variante-dev` : `~/lightwhisper-dev/`, Ctrl+Alt+Space, modèles partagés dans `~/lightwhisper/models`.
+- **Tests** : `make test` ; banc de vitesse : `make banc` (mode `--morceaux` pour la découpe).
 
 ## Storage Paths
 
 ```
 ~/lightwhisper/
-├── config.json              # {audio_device, model_size, language}
+├── config.json              # réglages (+ restaurer_presse_papier, transcription_par_morceaux)
+├── derniere-dictee.txt      # filet de sécurité (menu « Copier la dernière dictée »)
+├── journal.log              # une ligne par dictée : durées, focus, collage
 ├── models/ggml-{size}.bin   # Downloaded whisper.cpp models
 └── temp/                    # Temporary WAV files (macOS/Linux)
 ```

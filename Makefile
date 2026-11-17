@@ -12,7 +12,7 @@ PYTHON     := $(VENV)/bin/python3
 
 # ─── Main targets ───
 
-.PHONY: dev build install uninstall icons clean help
+.PHONY: dev build install uninstall icons clean help dev-variant installer-dev test banc
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -62,3 +62,32 @@ clean: ## Remove build artifacts
 	cd src-tauri && cargo clean
 	@rm -rf $(VENV)
 	@echo "Cleaned."
+
+# ─── Variante Dev (fork BarryBcr) ───
+# Pourquoi ces variables d'environnement :
+# - SDKROOT : les Command Line Tools installés (clang 14) ne trouvent pas stdlib.h
+#   sans SDK explicite sur macOS 26 ;
+# - -U ...MLComputePlan / MLOptimizationHints : le runtime ONNX précompilé référence des
+#   classes CoreML absentes du SDK 13.3. macOS 26 les fournit : on les résout à l'exécution ;
+# - CMAKE_POLICY_VERSION_MINIMUM : CMake 4 refuse les vieux cmake_minimum_required.
+SIGNATURE   := Light Whisper Dev Local
+DEV_APP     := Light Whisper Dev
+DEV_ENV     := SDKROOT=$$(xcrun --show-sdk-path) CMAKE_POLICY_VERSION_MINIMUM=3.5 \
+               RUSTFLAGS='-C link-arg=-Wl,-U,_OBJC_CLASS_$$_MLComputePlan -C link-arg=-Wl,-U,_OBJC_CLASS_$$_MLOptimizationHints'
+
+test: ## Tests unitaires Rust (collage, focus, découpe, journal, config)
+	cd src-tauri && $(DEV_ENV) cargo test --features variante-dev
+
+dev-variant: ## Construit « Light Whisper Dev » (.app signé localement). CLI : cargo install tauri-cli --version 2.10.1 --locked
+	cd src-tauri && $(DEV_ENV) APPLE_SIGNING_IDENTITY="$(SIGNATURE)" \
+		cargo tauri build --features variante-dev --config tauri.dev-variant.conf.json
+
+installer-dev: dev-variant ## Installe « Light Whisper Dev » à côté de l'original (intact)
+	@rm -rf "$(INSTALL_DIR)/$(DEV_APP).app"
+	@cp -R "$(BUNDLE_DIR)/macos/$(DEV_APP).app" "$(INSTALL_DIR)/"
+	@codesign -dv "$(INSTALL_DIR)/$(DEV_APP).app" 2>&1 | grep -E "Identifier|Authority"
+	@echo "Installé. Raccourci : Ctrl+Alt+Space. Réglages : ~/lightwhisper-dev/"
+
+banc: ## Banc de vitesse Parakeet (audio FR synthétique, voir bench/)
+	cd bench && ./generer-audio.sh && $(DEV_ENV) CARGO_TARGET_DIR=../src-tauri/target cargo run --release -- \
+		$$HOME/lightwhisper/models/parakeet-tdt audio/long16k.wav

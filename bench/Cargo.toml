@@ -1,0 +1,14 @@
+# Banc de vitesse Parakeet, hors de l'app : mêmes appels que src-tauri/src/stt.rs.
+# Crate séparée pour pouvoir comparer plusieurs versions de parakeet-rs sans toucher l'app.
+[package]
+name = "banc-transcription"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+parakeet-rs = { version = "=0.3.8" }
+hound = "3"
+
+[features]
+coreml = ["parakeet-rs/coreml"]

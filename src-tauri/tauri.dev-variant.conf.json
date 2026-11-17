@@ -1,0 +1,7 @@
+{
+  "productName": "Light Whisper Dev",
+  "identifier": "com.lightwhisper.dev",
+  "bundle": {
+    "targets": ["app"]
+  }
+}
